@@ -3,9 +3,13 @@ const crypto = require('crypto');
 const path = require('path');
 const ytdl = require('@distube/ytdl-core');
 const fetch = require('node-fetch');
+const cors = require('cors'); // <-- Import cors
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+
+// Enable CORS for all origins
+app.use(cors());
 
 // Middleware
 app.use(express.json());
@@ -110,7 +114,7 @@ app.get('/api/stream/:videoId', async (req, res) => {
       // Set headers for audio streaming
       res.setHeader('Content-Type', bestAudio.mimeType || 'audio/webm');
       res.setHeader('Accept-Ranges', 'bytes');
-      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Origin', '*'); // This can stay for streaming
       res.setHeader('Cache-Control', 'no-cache');
       
       // Create audio stream from the selected format
