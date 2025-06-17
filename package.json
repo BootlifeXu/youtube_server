@@ -1,0 +1,20 @@
+{
+  "name": "youtube-audio-server",
+  "version": "1.0.0",
+  "description": "Express server that streams YouTube audio using ytdl-core",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@distube/ytdl-core": "^4.16.12",
+    "express": "^5.1.0",
+    "ytdl-core": "^4.11.5"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
