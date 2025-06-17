@@ -2,20 +2,15 @@
   "version": 2,
   "builds": [
     {
-      "src": "server.js",
-      "use": "@vercel/node",
-      "config": {
-        "maxLambdaSize": "50mb"
-      }
+      "src": "api/index.js",
+      "use": "@vercel/node"
     }
   ],
   "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "server.js"
-    }
+    { "src": "/(.*)", "dest": "/api/index.js" }
   ],
   "env": {
+    "YOUTUBE_API_KEY": "AIzaSyD2o0roVVcvfCEseTsqyFI6J2gs68hNcdo",
     "NODE_ENV": "production"
   }
 }
