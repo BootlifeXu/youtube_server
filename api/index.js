@@ -1,17 +1,21 @@
 const express = require('express');
-const serverless = require('serverless-http');
 const ytdl = require('@distube/ytdl-core');
 const fetch = require('node-fetch');
 const cors = require('cors');
 
 const app = express();
+const PORT = process.env.PORT || 3000;
 
-// Enable CORS
+// Enable CORS for all origins (adjust for production)
 app.use(cors({
-  origin: '*',
+  origin: '*', // Allow all origins - adjust this for production security
   methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+  credentials: false
 }));
+
+// Handle preflight requests
+app.options('*', cors());
 
 app.use(express.json());
 
@@ -24,14 +28,125 @@ function validateAndGetApiKey(md5Hash) {
   return apiKey;
 }
 
+// Health check endpoint
 app.get('/', (req, res) => {
-  res.json({ message: 'API is running' });
+  res.json({ 
+    message: 'YouTube Audio API is running',
+    status: 'OK',
+    timestamp: new Date().toISOString()
+  });
 });
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'OK' });
+  res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'OK', timestamp: new Date().toISOString() });
+});
+
+// Search endpoint - POST method to match frontend
+app.post('/api/search', async (req, res) => {
+  try {
+    const { query, pageToken, md5Hash } = req.body;
+    
+    if (!query) {
+      return res.status(400).json({ error: 'Query parameter is required' });
+    }
+    
+    const apiKey = validateAndGetApiKey(md5Hash);
+
+    console.log('Searching for:', query, 'Page token:', pageToken);
+
+    const url = new URL('https://www.googleapis.com/youtube/v3/search');
+    url.searchParams.set('part', 'snippet');
+    url.searchParams.set('type', 'video');
+    url.searchParams.set('q', query);
+    url.searchParams.set('maxResults', '10');
+    url.searchParams.set('key', apiKey);
+    if (pageToken) url.searchParams.set('pageToken', pageToken);
+
+    const response = await fetch(url);
+    const data = await response.json();
+
+    if (!response.ok) {
+      console.error('YouTube API error:', data);
+      return res.status(response.status).json({ 
+        error: data.error?.message || 'YouTube API error',
+        details: data
+      });
+    }
+
+    const videos = data.items.map(item => ({
+      id: item.id.videoId,
+      title: item.snippet.title,
+      channel: item.snippet.channelTitle,
+      thumbnail: item.snippet.thumbnails?.medium?.url || item.snippet.thumbnails?.default?.url,
+      publishedAt: item.snippet.publishedAt
+    }));
+
+    console.log(`Found ${videos.length} videos`);
+
+    res.json({ 
+      videos, 
+      nextPageToken: data.nextPageToken,
+      prevPageToken: data.prevPageToken 
+    });
+  } catch (err) {
+    console.error('Search error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Audio endpoint - POST method to match frontend
+app.post('/api/audio/:videoId', async (req, res) => {
+  try {
+    const { videoId } = req.params;
+    const { md5Hash } = req.body;
+    
+    if (!videoId) {
+      return res.status(400).json({ error: 'Video ID is required' });
+    }
+    
+    if (md5Hash !== VALID_MD5_HASH) {
+      return res.status(403).json({ error: 'Invalid hash' });
+    }
+
+    console.log('Getting audio for video:', videoId);
+
+    const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+    const info = await ytdl.getInfo(videoUrl);
+    
+    // Get the best audio format
+    const audioFormats = ytdl.filterFormats(info.formats, 'audioonly');
+    
+    if (audioFormats.length === 0) {
+      return res.status(404).json({ error: 'No audio formats found for this video' });
+    }
+
+    // Get the highest quality audio format
+    const audio = audioFormats.reduce((best, current) => {
+      const bestBitrate = parseInt(best.audioBitrate) || 0;
+      const currentBitrate = parseInt(current.audioBitrate) || 0;
+      return currentBitrate > bestBitrate ? current : best;
+    });
+
+    console.log('Audio format found:', audio.mimeType, audio.audioBitrate);
+
+    res.json({
+      audioUrl: audio.url,
+      title: info.videoDetails.title,
+      duration: info.videoDetails.lengthSeconds,
+      mimeType: audio.mimeType,
+      bitrate: audio.audioBitrate
+    });
+  } catch (err) {
+    console.error('Audio fetch error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Legacy endpoints for backward compatibility
 app.get('/search/:hash', async (req, res) => {
   try {
     const { hash } = req.params;
@@ -42,7 +157,7 @@ app.get('/search/:hash', async (req, res) => {
     url.searchParams.set('part', 'snippet');
     url.searchParams.set('type', 'video');
     url.searchParams.set('q', query);
-    url.searchParams.set('maxResults', 10);
+    url.searchParams.set('maxResults', '10');
     url.searchParams.set('key', apiKey);
     if (pageToken) url.searchParams.set('pageToken', pageToken);
 
@@ -83,5 +198,22 @@ app.get('/download/:hash/:videoId', async (req, res) => {
   }
 });
 
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).json({ error: 'Something went wrong!' });
+});
+
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({ error: 'Endpoint not found' });
+});
+
+// Start server
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`YouTube API Key configured: ${!!process.env.YOUTUBE_API_KEY}`);
+});
+
 module.exports = app;
-module.exports.handler = serverless(app);
