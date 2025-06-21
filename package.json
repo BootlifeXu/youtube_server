@@ -1,5 +1,8 @@
 {
+  "name": "youtube-audio-server",
+  "version": "1.0.0",
   "main": "api/index.js",
+  "type": "module",
   "scripts": {
     "start": "node api/index.js"
   },
@@ -8,6 +11,5 @@
     "cors": "^2.8.5",
     "express": "^4.18.2",
     "node-fetch": "^2.7.0"
-  },
-  "type": "module"
+  }
 }
