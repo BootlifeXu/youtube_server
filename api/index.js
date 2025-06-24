@@ -1,5 +1,3 @@
-// api/index.js
-
 import express from 'express';
 import cors from 'cors';
 import fetch from 'node-fetch';
@@ -14,8 +12,20 @@ const sql = postgres(process.env.DATABASE_URL, {
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware
-app.use(cors());
+// --- Middleware ---
+
+// ⭐ FIX: Replaced simple cors() with a more robust configuration
+// This explicitly allows requests from any origin and handles the browser's
+// preflight OPTIONS requests, which is the cause of the "Failed to fetch" error.
+const corsOptions = {
+  origin: '*', // Allow all origins
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], // Allow all standard methods
+  allowedHeaders: ['Content-Type', 'Authorization'], // Allow common headers
+};
+app.use(cors(corsOptions));
+// Ensure preflight requests are handled for all routes
+app.options('*', cors(corsOptions)); 
+
 app.use(express.json());
 
 // --- Core & Health Routes (No changes) ---
@@ -56,7 +66,10 @@ app.post('/api/favorites', async (req, res) => {
       INSERT INTO favorites (video_id, title, channel, thumbnail, folder_id)
       VALUES (${id}, ${title}, ${channel}, ${thumbnail}, ${folderId || null})
       ON CONFLICT (video_id) DO UPDATE SET -- If song exists, update its folder
-        folder_id = EXCLUDED.folder_id;
+        folder_id = EXCLUDED.folder_id,
+        title = EXCLUDED.title, -- Also update title/channel in case they changed
+        channel = EXCLUDED.channel,
+        thumbnail = EXCLUDED.thumbnail;
     `;
     res.status(201).json({ message: 'Favorite added or updated' });
   } catch (error) {
@@ -162,7 +175,6 @@ app.delete('/api/folders/:folderId', async (req, res) => {
 
 
 // --- Streaming and Search Routes (No changes) ---
-// ... (your existing /api/stream and /api/search code here)
 app.get('/api/stream/:videoId', async (req, res) => {
   const { videoId } = req.params;
   if (!ytdl.validateID(videoId)) {
