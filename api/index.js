@@ -142,3 +142,40 @@ app.post('/api/search', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
 });
+
+// --- 📁 FOLDERS API ---
+
+// GET /api/folders - Fetch all folders
+app.get('/api/folders', async (req, res) => {
+  try {
+    const folders = await sql`SELECT * FROM folders ORDER BY created_at DESC`;
+    res.status(200).json(folders);
+  } catch (error) {
+    console.error('DB Error - Fetching folders:', error);
+    res.status(500).json({ error: 'Failed to fetch folders from database' });
+  }
+});
+
+// POST /api/folders - Save all folders (overwrite all)
+app.post('/api/folders', async (req, res) => {
+  try {
+    const incomingFolders = req.body;
+    if (!Array.isArray(incomingFolders)) {
+      return res.status(400).json({ error: 'Invalid folder data format' });
+    }
+
+    // Clear and reinsert
+    await sql`DELETE FROM folders`;
+    for (const folder of incomingFolders) {
+      await sql`
+        INSERT INTO folders (id, name, created_at)
+        VALUES (${folder.id}, ${folder.name}, ${folder.createdAt || new Date().toISOString()})
+      `;
+    }
+
+    res.status(200).json({ message: 'Folders saved successfully' });
+  } catch (error) {
+    console.error('DB Error - Saving folders:', error);
+    res.status(500).json({ error: 'Failed to save folders to database' });
+  }
+});
