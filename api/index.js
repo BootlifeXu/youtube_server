@@ -5,6 +5,8 @@ import ytdl from '@distube/ytdl-core';
 import postgres from 'postgres';
 
 // --- Database Connection ---
+// This part is unchanged, but is the most likely source of the error.
+// Ensure your DATABASE_URL is set correctly in your Railway environment variables.
 const sql = postgres(process.env.DATABASE_URL, {
   ssl: 'require', 
 });
@@ -14,17 +16,9 @@ const PORT = process.env.PORT || 3000;
 
 // --- Middleware ---
 
-// ⭐ FIX: Replaced simple cors() with a more robust configuration
-// This explicitly allows requests from any origin and handles the browser's
-// preflight OPTIONS requests, which is the cause of the "Failed to fetch" error.
-const corsOptions = {
-  origin: '*', // Allow all origins
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], // Allow all standard methods
-  allowedHeaders: ['Content-Type', 'Authorization'], // Allow common headers
-};
-app.use(cors(corsOptions));
-// Ensure preflight requests are handled for all routes
-app.options('*', cors(corsOptions)); 
+// ⭐ FIX: Simplified and robust CORS setup.
+// This allows all origins and methods your app uses, and correctly handles preflight requests.
+app.use(cors()); 
 
 app.use(express.json());
 
@@ -39,13 +33,12 @@ app.get('/api/health', (req, res) => res.status(200).json({ status: 'ok' }));
 app.get('/api/favorites', async (req, res) => {
   try {
     const favorites = await sql`SELECT * FROM favorites ORDER BY created_at DESC`;
-    // Map db `video_id` and `folder_id` to JS-friendly camelCase
     const formattedFavorites = favorites.map(fav => ({
         id: fav.video_id,
         title: fav.title,
         channel: fav.channel,
         thumbnail: fav.thumbnail,
-        folderId: fav.folder_id // Send folderId to frontend
+        folderId: fav.folder_id
     }));
     res.status(200).json(formattedFavorites);
   } catch (error) {
@@ -57,7 +50,6 @@ app.get('/api/favorites', async (req, res) => {
 // POST /api/favorites - Add a new favorite
 app.post('/api/favorites', async (req, res) => {
   try {
-    // Now accepts an optional folderId
     const { id, title, channel, thumbnail, folderId } = req.body;
     if (!id || !title || !channel) {
       return res.status(400).json({ error: 'Missing required favorite data' });
@@ -65,9 +57,9 @@ app.post('/api/favorites', async (req, res) => {
     await sql`
       INSERT INTO favorites (video_id, title, channel, thumbnail, folder_id)
       VALUES (${id}, ${title}, ${channel}, ${thumbnail}, ${folderId || null})
-      ON CONFLICT (video_id) DO UPDATE SET -- If song exists, update its folder
+      ON CONFLICT (video_id) DO UPDATE SET
         folder_id = EXCLUDED.folder_id,
-        title = EXCLUDED.title, -- Also update title/channel in case they changed
+        title = EXCLUDED.title,
         channel = EXCLUDED.channel,
         thumbnail = EXCLUDED.thumbnail;
     `;
@@ -94,7 +86,7 @@ app.delete('/api/favorites/:videoId', async (req, res) => {
 app.put('/api/favorites/:videoId/move', async (req, res) => {
   try {
     const { videoId } = req.params;
-    const { folderId } = req.body; // folderId can be a string or null
+    const { folderId } = req.body;
     const result = await sql`
       UPDATE favorites SET folder_id = ${folderId || null} WHERE video_id = ${videoId}
     `;
@@ -159,11 +151,8 @@ app.put('/api/folders/:folderId', async (req, res) => {
 app.delete('/api/folders/:folderId', async (req, res) => {
   const { folderId } = req.params;
   try {
-    // Use a transaction to ensure both operations succeed or fail together
     await sql.begin(async sql => {
-      // 1. Move all favorites from this folder to the root (folder_id = null)
       await sql`UPDATE favorites SET folder_id = NULL WHERE folder_id = ${folderId}`;
-      // 2. Delete the folder itself
       await sql`DELETE FROM folders WHERE id = ${folderId}`;
     });
     res.status(200).json({ message: 'Folder deleted and contents moved to root' });
@@ -227,7 +216,22 @@ app.post('/api/search', async (req, res) => {
 });
 
 
-// Start the server
-app.listen(PORT, () => {
-  console.log(`✅ Server running on port ${PORT}`);
-});
+// ⭐ FIX: Start server only after a successful database connection
+async function startServer() {
+  try {
+    // Test the database connection by running a simple query
+    await sql`SELECT 1`;
+    console.log('✅ Database connection successful.');
+
+    // Start listening for requests only after DB is confirmed to be connected
+    app.listen(PORT, () => {
+      console.log(`✅ Server is running on http://localhost:${PORT}`);
+    });
+  } catch (error) {
+    console.error('🔴 FATAL: Could not connect to the database. Please check your DATABASE_URL environment variable.');
+    console.error(error);
+    process.exit(1); // Exit the process with an error code
+  }
+}
+
+startServer();
