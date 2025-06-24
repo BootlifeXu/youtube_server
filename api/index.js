@@ -19,11 +19,11 @@ app.use(express.json());
 
 // Core & Health Routes
 app.get('/', (req, res) => res.status(200).json({ message: 'Server is up and running!' }));
-// [FIX] Removed '/api' prefix
+// [FIXED] The '/api' prefix has been removed.
 app.get('/health', (req, res) => res.status(200).json({ status: 'ok' }));
 
 // --- Folder CRUD Operations ---
-// [FIX] Removed '/api' prefix
+// [FIXED] The '/api' prefix has been removed.
 app.get('/folders', async (req, res) => {
   try {
     const folders = await sql`SELECT * FROM folders ORDER BY name`;
@@ -34,7 +34,7 @@ app.get('/folders', async (req, res) => {
   }
 });
 
-// [FIX] Removed '/api' prefix
+// [FIXED] The '/api' prefix has been removed.
 app.post('/folders', async (req, res) => {
   try {
     const { name } = req.body;
@@ -53,7 +53,7 @@ app.post('/folders', async (req, res) => {
   }
 });
 
-// [FIX] Removed '/api' prefix
+// [FIXED] The '/api' prefix has been removed.
 app.put('/folders/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -77,7 +77,7 @@ app.put('/folders/:id', async (req, res) => {
   }
 });
 
-// [FIX] Removed '/api' prefix
+// [FIXED] The '/api' prefix has been removed.
 app.delete('/folders/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -94,7 +94,7 @@ app.delete('/folders/:id', async (req, res) => {
 });
 
 // --- Enhanced Favorites API with Folder Support ---
-// [FIX] Removed '/api' prefix
+// [FIXED] The '/api' prefix has been removed.
 app.get('/favorites', async (req, res) => {
   try {
     const favorites = await sql`
@@ -117,7 +117,7 @@ app.get('/favorites', async (req, res) => {
   }
 });
 
-// [FIX] Removed '/api' prefix
+// [FIXED] The '/api' prefix has been removed.
 app.post('/favorites', async (req, res) => {
   try {
     const { id, title, channel, thumbnail, folderId } = req.body;
@@ -139,7 +139,7 @@ app.post('/favorites', async (req, res) => {
   }
 });
 
-// [FIX] Removed '/api' prefix
+// [FIXED] The '/api' prefix has been removed.
 app.delete('/favorites/:videoId', async (req, res) => {
   try {
     const { videoId } = req.params;
@@ -157,7 +157,7 @@ app.delete('/favorites/:videoId', async (req, res) => {
 });
 
 // --- Streaming and Search Routes ---
-// [FIX] Removed '/api' prefix
+// [FIXED] The '/api' prefix has been removed.
 app.get('/stream/:videoId', async (req, res) => {
   const { videoId } = req.params;
   if (!ytdl.validateID(videoId)) {
@@ -177,7 +177,7 @@ app.get('/stream/:videoId', async (req, res) => {
   }
 });
 
-// [FIX] Removed '/api' prefix
+// [FIXED] The '/api' prefix has been removed.
 app.post('/search', async (req, res) => {
   const { query, pageToken, md5Hash } = req.body;
   if (md5Hash !== '6bb8c2f529084cdbc037e4b801cc2ab4') {
