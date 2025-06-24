@@ -11,7 +11,7 @@ const sql = postgres(process.env.DATABASE_URL, {
 });
 
 const app = express();
-const PORT = process.env.PORT || 8080; // Changed to 8080 to match your logs
+const PORT = process.env.PORT || 8080;
 
 // Middleware
 app.use(cors());
@@ -19,10 +19,12 @@ app.use(express.json());
 
 // Core & Health Routes
 app.get('/', (req, res) => res.status(200).json({ message: 'Server is up and running!' }));
-app.get('/api/health', (req, res) => res.status(200).json({ status: 'ok' }));
+// [FIX] Removed '/api' prefix
+app.get('/health', (req, res) => res.status(200).json({ status: 'ok' }));
 
 // --- Folder CRUD Operations ---
-app.get('/api/folders', async (req, res) => {
+// [FIX] Removed '/api' prefix
+app.get('/folders', async (req, res) => {
   try {
     const folders = await sql`SELECT * FROM folders ORDER BY name`;
     res.status(200).json(folders);
@@ -32,7 +34,8 @@ app.get('/api/folders', async (req, res) => {
   }
 });
 
-app.post('/api/folders', async (req, res) => {
+// [FIX] Removed '/api' prefix
+app.post('/folders', async (req, res) => {
   try {
     const { name } = req.body;
     if (!name) {
@@ -50,7 +53,8 @@ app.post('/api/folders', async (req, res) => {
   }
 });
 
-app.put('/api/folders/:id', async (req, res) => {
+// [FIX] Removed '/api' prefix
+app.put('/folders/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { name } = req.body;
@@ -73,7 +77,8 @@ app.put('/api/folders/:id', async (req, res) => {
   }
 });
 
-app.delete('/api/folders/:id', async (req, res) => {
+// [FIX] Removed '/api' prefix
+app.delete('/folders/:id', async (req, res) => {
   try {
     const { id } = req.params;
     await sql`UPDATE favorites SET folder_id = NULL WHERE folder_id = ${id}`;
@@ -89,7 +94,8 @@ app.delete('/api/folders/:id', async (req, res) => {
 });
 
 // --- Enhanced Favorites API with Folder Support ---
-app.get('/api/favorites', async (req, res) => {
+// [FIX] Removed '/api' prefix
+app.get('/favorites', async (req, res) => {
   try {
     const favorites = await sql`
       SELECT 
@@ -111,7 +117,8 @@ app.get('/api/favorites', async (req, res) => {
   }
 });
 
-app.post('/api/favorites', async (req, res) => {
+// [FIX] Removed '/api' prefix
+app.post('/favorites', async (req, res) => {
   try {
     const { id, title, channel, thumbnail, folderId } = req.body;
     if (!id || !title || !channel) {
@@ -132,7 +139,8 @@ app.post('/api/favorites', async (req, res) => {
   }
 });
 
-app.delete('/api/favorites/:videoId', async (req, res) => {
+// [FIX] Removed '/api' prefix
+app.delete('/favorites/:videoId', async (req, res) => {
   try {
     const { videoId } = req.params;
     const result = await sql`
@@ -149,7 +157,8 @@ app.delete('/api/favorites/:videoId', async (req, res) => {
 });
 
 // --- Streaming and Search Routes ---
-app.get('/api/stream/:videoId', async (req, res) => {
+// [FIX] Removed '/api' prefix
+app.get('/stream/:videoId', async (req, res) => {
   const { videoId } = req.params;
   if (!ytdl.validateID(videoId)) {
     return res.status(400).send('Invalid YouTube Video ID');
@@ -168,7 +177,8 @@ app.get('/api/stream/:videoId', async (req, res) => {
   }
 });
 
-app.post('/api/search', async (req, res) => {
+// [FIX] Removed '/api' prefix
+app.post('/search', async (req, res) => {
   const { query, pageToken, md5Hash } = req.body;
   if (md5Hash !== '6bb8c2f529084cdbc037e4b801cc2ab4') {
     return res.status(403).json({ error: 'Invalid API key hash' });
