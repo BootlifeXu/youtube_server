@@ -17,14 +17,15 @@ const PORT = process.env.PORT || 8080;
 app.use(cors());
 app.use(express.json());
 
-// Core & Health Routes
-app.get('/', (req, res) => res.status(200).json({ message: 'Server is up and running!' }));
-// [FIXED] The '/api' prefix has been removed.
-app.get('/health', (req, res) => res.status(200).json({ status: 'ok' }));
+// [FIX] Create a new router instance for our API
+const api = express.Router();
 
-// --- Folder CRUD Operations ---
-// [FIXED] The '/api' prefix has been removed.
-app.get('/folders', async (req, res) => {
+// --- Core & Health Routes on the API Router ---
+// All routes will now be defined on 'api' and will be prefixed by '/api' later
+api.get('/health', (req, res) => res.status(200).json({ status: 'ok' }));
+
+// --- Folder CRUD Operations on the API Router ---
+api.get('/folders', async (req, res) => {
   try {
     const folders = await sql`SELECT * FROM folders ORDER BY name`;
     res.status(200).json(folders);
@@ -34,8 +35,7 @@ app.get('/folders', async (req, res) => {
   }
 });
 
-// [FIXED] The '/api' prefix has been removed.
-app.post('/folders', async (req, res) => {
+api.post('/folders', async (req, res) => {
   try {
     const { name } = req.body;
     if (!name) {
@@ -53,8 +53,7 @@ app.post('/folders', async (req, res) => {
   }
 });
 
-// [FIXED] The '/api' prefix has been removed.
-app.put('/folders/:id', async (req, res) => {
+api.put('/folders/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { name } = req.body;
@@ -77,8 +76,7 @@ app.put('/folders/:id', async (req, res) => {
   }
 });
 
-// [FIXED] The '/api' prefix has been removed.
-app.delete('/folders/:id', async (req, res) => {
+api.delete('/folders/:id', async (req, res) => {
   try {
     const { id } = req.params;
     await sql`UPDATE favorites SET folder_id = NULL WHERE folder_id = ${id}`;
@@ -93,9 +91,8 @@ app.delete('/folders/:id', async (req, res) => {
   }
 });
 
-// --- Enhanced Favorites API with Folder Support ---
-// [FIXED] The '/api' prefix has been removed.
-app.get('/favorites', async (req, res) => {
+// --- Enhanced Favorites API with Folder Support on the API Router ---
+api.get('/favorites', async (req, res) => {
   try {
     const favorites = await sql`
       SELECT 
@@ -117,8 +114,7 @@ app.get('/favorites', async (req, res) => {
   }
 });
 
-// [FIXED] The '/api' prefix has been removed.
-app.post('/favorites', async (req, res) => {
+api.post('/favorites', async (req, res) => {
   try {
     const { id, title, channel, thumbnail, folderId } = req.body;
     if (!id || !title || !channel) {
@@ -139,8 +135,7 @@ app.post('/favorites', async (req, res) => {
   }
 });
 
-// [FIXED] The '/api' prefix has been removed.
-app.delete('/favorites/:videoId', async (req, res) => {
+api.delete('/favorites/:videoId', async (req, res) => {
   try {
     const { videoId } = req.params;
     const result = await sql`
@@ -156,9 +151,8 @@ app.delete('/favorites/:videoId', async (req, res) => {
   }
 });
 
-// --- Streaming and Search Routes ---
-// [FIXED] The '/api' prefix has been removed.
-app.get('/stream/:videoId', async (req, res) => {
+// --- Streaming and Search Routes on the API Router ---
+api.get('/stream/:videoId', async (req, res) => {
   const { videoId } = req.params;
   if (!ytdl.validateID(videoId)) {
     return res.status(400).send('Invalid YouTube Video ID');
@@ -177,8 +171,7 @@ app.get('/stream/:videoId', async (req, res) => {
   }
 });
 
-// [FIXED] The '/api' prefix has been removed.
-app.post('/search', async (req, res) => {
+api.post('/search', async (req, res) => {
   const { query, pageToken, md5Hash } = req.body;
   if (md5Hash !== '6bb8c2f529084cdbc037e4b801cc2ab4') {
     return res.status(403).json({ error: 'Invalid API key hash' });
@@ -209,6 +202,12 @@ app.post('/search', async (req, res) => {
     res.status(500).json({ error: 'Search failed' });
   }
 });
+
+// [FIX] Tell the main 'app' to use our 'api' router for any path that starts with '/api'
+app.use('/api', api);
+
+// The root route remains on the main app
+app.get('/', (req, res) => res.status(200).json({ message: 'Server is up and running!' }));
 
 // Graceful shutdown handler
 const gracefulShutdown = () => {
