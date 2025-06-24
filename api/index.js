@@ -14,8 +14,7 @@ const PORT = process.env.PORT || 3000;
 
 // --- Middleware ---
 
-// ⭐ THE FIX: This line solves the CORS error.
-// It must be placed before your API routes.
+// Fixes the "blocked by CORS policy" error from the browser.
 app.use(cors()); 
 
 app.use(express.json());
@@ -42,9 +41,6 @@ app.get('/api/favorites', async (req, res) => {
   }
 });
 
-// ... (The rest of your API routes: POST /favorites, DELETE /favorites, etc., remain the same) ...
-
-// POST /api/favorites
 app.post('/api/favorites', async (req, res) => {
   try {
     const { id, title, channel, thumbnail, folderId } = req.body;
@@ -67,7 +63,6 @@ app.post('/api/favorites', async (req, res) => {
   }
 });
 
-// DELETE /api/favorites/:videoId
 app.delete('/api/favorites/:videoId', async (req, res) => {
   try {
     const { videoId } = req.params;
@@ -79,7 +74,6 @@ app.delete('/api/favorites/:videoId', async (req, res) => {
   }
 });
 
-// PUT /api/favorites/:videoId/move
 app.put('/api/favorites/:videoId/move', async (req, res) => {
   try {
     const { videoId } = req.params;
@@ -98,7 +92,6 @@ app.put('/api/favorites/:videoId/move', async (req, res) => {
 });
 
 // --- Folders API Routes ---
-// GET /api/folders
 app.get('/api/folders', async (req, res) => {
   try {
     const folders = await sql`SELECT * FROM folders ORDER BY created_at DESC`;
@@ -109,7 +102,6 @@ app.get('/api/folders', async (req, res) => {
   }
 });
 
-// POST /api/folders
 app.post('/api/folders', async (req, res) => {
   try {
     const { id, name, createdAt } = req.body;
@@ -127,7 +119,6 @@ app.post('/api/folders', async (req, res) => {
   }
 });
 
-// PUT /api/folders/:folderId
 app.put('/api/folders/:folderId', async (req, res) => {
   try {
     const { folderId } = req.params;
@@ -142,7 +133,6 @@ app.put('/api/folders/:folderId', async (req, res) => {
   }
 });
 
-// DELETE /api/folders/:folderId
 app.delete('/api/folders/:folderId', async (req, res) => {
   const { folderId } = req.params;
   try {
@@ -209,20 +199,24 @@ app.post('/api/search', async (req, res) => {
   }
 });
 
-// --- Start server only after a successful database connection ---
+// --- Start Server ---
 async function startServer() {
   try {
+    // 1. Test database connection
     await sql`SELECT 1`;
     console.log('✅ Database connection successful.');
 
-    app.listen(PORT, () => {
-      console.log(`✅ Server is running on http://localhost:${PORT}`);
+    // 2. Start listening on the correct host and port for Railway
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`✅ Server is running and listening on port ${PORT}`);
     });
+    
   } catch (error) {
     console.error('🔴 FATAL: Could not connect to the database. Please check your DATABASE_URL environment variable.');
     console.error(error);
-    process.exit(1);
+    process.exit(1); // Exit if database connection fails
   }
 }
 
+// Run the server
 startServer();
