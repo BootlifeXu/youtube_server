@@ -11,7 +11,7 @@ const sql = postgres(process.env.DATABASE_URL, {
 });
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080; // Changed to 8080 to match your logs
 
 // Middleware
 app.use(cors());
@@ -200,7 +200,26 @@ app.post('/api/search', async (req, res) => {
   }
 });
 
+// Graceful shutdown handler
+const gracefulShutdown = () => {
+  console.log('Shutting down gracefully...');
+  server.close(() => {
+    console.log('Server closed');
+    process.exit(0);
+  });
+
+  // Force close after 5 seconds
+  setTimeout(() => {
+    console.error('Forcing shutdown after timeout');
+    process.exit(1);
+  }, 5000);
+};
+
 // Start the server
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
 });
+
+// Listen for shutdown signals
+process.on('SIGTERM', gracefulShutdown);
+process.on('SIGINT', gracefulShutdown);
