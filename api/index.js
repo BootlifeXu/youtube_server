@@ -5,8 +5,6 @@ import ytdl from '@distube/ytdl-core';
 import postgres from 'postgres';
 
 // --- Database Connection ---
-// This part is unchanged, but is the most likely source of the error.
-// Ensure your DATABASE_URL is set correctly in your Railway environment variables.
 const sql = postgres(process.env.DATABASE_URL, {
   ssl: 'require', 
 });
@@ -16,20 +14,17 @@ const PORT = process.env.PORT || 3000;
 
 // --- Middleware ---
 
-// ⭐ FIX: Simplified and robust CORS setup.
-// This allows all origins and methods your app uses, and correctly handles preflight requests.
+// ⭐ THE FIX: This line solves the CORS error.
+// It must be placed before your API routes.
 app.use(cors()); 
 
 app.use(express.json());
 
-// --- Core & Health Routes (No changes) ---
+// --- Core & Health Routes ---
 app.get('/', (req, res) => res.status(200).json({ message: 'Server is up and running!' }));
 app.get('/api/health', (req, res) => res.status(200).json({ status: 'ok' }));
 
-
-// --- ⭐ UPDATED DATABASE-DRIVEN FAVORITES API ⭐ ---
-
-// GET /api/favorites - Fetch all favorites
+// --- Favorites API Routes ---
 app.get('/api/favorites', async (req, res) => {
   try {
     const favorites = await sql`SELECT * FROM favorites ORDER BY created_at DESC`;
@@ -47,7 +42,9 @@ app.get('/api/favorites', async (req, res) => {
   }
 });
 
-// POST /api/favorites - Add a new favorite
+// ... (The rest of your API routes: POST /favorites, DELETE /favorites, etc., remain the same) ...
+
+// POST /api/favorites
 app.post('/api/favorites', async (req, res) => {
   try {
     const { id, title, channel, thumbnail, folderId } = req.body;
@@ -70,7 +67,7 @@ app.post('/api/favorites', async (req, res) => {
   }
 });
 
-// DELETE /api/favorites/:videoId - Remove a favorite
+// DELETE /api/favorites/:videoId
 app.delete('/api/favorites/:videoId', async (req, res) => {
   try {
     const { videoId } = req.params;
@@ -82,7 +79,7 @@ app.delete('/api/favorites/:videoId', async (req, res) => {
   }
 });
 
-// PUT /api/favorites/:videoId/move - Move a favorite to a different folder
+// PUT /api/favorites/:videoId/move
 app.put('/api/favorites/:videoId/move', async (req, res) => {
   try {
     const { videoId } = req.params;
@@ -100,10 +97,8 @@ app.put('/api/favorites/:videoId/move', async (req, res) => {
   }
 });
 
-
-// --- ⭐ UPDATED DATABASE-DRIVEN FOLDERS API ⭐ ---
-
-// GET /api/folders - Fetch all folders
+// --- Folders API Routes ---
+// GET /api/folders
 app.get('/api/folders', async (req, res) => {
   try {
     const folders = await sql`SELECT * FROM folders ORDER BY created_at DESC`;
@@ -114,7 +109,7 @@ app.get('/api/folders', async (req, res) => {
   }
 });
 
-// POST /api/folders - Create a new folder
+// POST /api/folders
 app.post('/api/folders', async (req, res) => {
   try {
     const { id, name, createdAt } = req.body;
@@ -132,7 +127,7 @@ app.post('/api/folders', async (req, res) => {
   }
 });
 
-// PUT /api/folders/:folderId - Rename a folder
+// PUT /api/folders/:folderId
 app.put('/api/folders/:folderId', async (req, res) => {
   try {
     const { folderId } = req.params;
@@ -147,7 +142,7 @@ app.put('/api/folders/:folderId', async (req, res) => {
   }
 });
 
-// DELETE /api/folders/:folderId - Delete a folder and move its contents
+// DELETE /api/folders/:folderId
 app.delete('/api/folders/:folderId', async (req, res) => {
   const { folderId } = req.params;
   try {
@@ -162,8 +157,7 @@ app.delete('/api/folders/:folderId', async (req, res) => {
   }
 });
 
-
-// --- Streaming and Search Routes (No changes) ---
+// --- Streaming and Search Routes ---
 app.get('/api/stream/:videoId', async (req, res) => {
   const { videoId } = req.params;
   if (!ytdl.validateID(videoId)) {
@@ -215,22 +209,19 @@ app.post('/api/search', async (req, res) => {
   }
 });
 
-
-// ⭐ FIX: Start server only after a successful database connection
+// --- Start server only after a successful database connection ---
 async function startServer() {
   try {
-    // Test the database connection by running a simple query
     await sql`SELECT 1`;
     console.log('✅ Database connection successful.');
 
-    // Start listening for requests only after DB is confirmed to be connected
     app.listen(PORT, () => {
       console.log(`✅ Server is running on http://localhost:${PORT}`);
     });
   } catch (error) {
     console.error('🔴 FATAL: Could not connect to the database. Please check your DATABASE_URL environment variable.');
     console.error(error);
-    process.exit(1); // Exit the process with an error code
+    process.exit(1);
   }
 }
 
