@@ -17,11 +17,11 @@ const PORT = process.env.PORT || 8080;
 app.use(cors());
 app.use(express.json());
 
-// [FIX] Create a new router instance for our API
+// Create a new router instance for our API. This is the standard practice.
 const api = express.Router();
 
 // --- Core & Health Routes on the API Router ---
-// All routes will now be defined on 'api' and will be prefixed by '/api' later
+// These routes will be accessed via /api/health, etc.
 api.get('/health', (req, res) => res.status(200).json({ status: 'ok' }));
 
 // --- Folder CRUD Operations on the API Router ---
@@ -91,7 +91,7 @@ api.delete('/folders/:id', async (req, res) => {
   }
 });
 
-// --- Enhanced Favorites API with Folder Support on the API Router ---
+// --- Favorites API Routes on the API Router ---
 api.get('/favorites', async (req, res) => {
   try {
     const favorites = await sql`
@@ -118,16 +118,14 @@ api.post('/favorites', async (req, res) => {
   try {
     const { id, title, channel, thumbnail, folderId } = req.body;
     if (!id || !title || !channel) {
-      return res.status(400).json({ error: 'Missing required favorite data (id, title, channel)' });
+      return res.status(400).json({ error: 'Missing required favorite data' });
     }
-    
     await sql`
       INSERT INTO favorites (video_id, title, channel, thumbnail, folder_id)
       VALUES (${id}, ${title}, ${channel}, ${thumbnail}, ${folderId || null})
       ON CONFLICT (video_id) DO UPDATE 
       SET folder_id = EXCLUDED.folder_id
     `;
-    
     res.status(201).json({ message: 'Favorite added successfully' });
   } catch (error) {
     console.error('DB Error - Adding favorite:', error);
@@ -138,11 +136,9 @@ api.post('/favorites', async (req, res) => {
 api.delete('/favorites/:videoId', async (req, res) => {
   try {
     const { videoId } = req.params;
-    const result = await sql`
-      DELETE FROM favorites WHERE video_id = ${videoId}
-    `;
+    const result = await sql`DELETE FROM favorites WHERE video_id = ${videoId}`;
     if (result.count === 0) {
-      return res.status(404).json({ message: 'Favorite not found in database' });
+      return res.status(404).json({ message: 'Favorite not found' });
     }
     res.status(200).json({ message: 'Favorite removed successfully' });
   } catch (error) {
@@ -153,82 +149,63 @@ api.delete('/favorites/:videoId', async (req, res) => {
 
 // --- Streaming and Search Routes on the API Router ---
 api.get('/stream/:videoId', async (req, res) => {
-  const { videoId } = req.params;
-  if (!ytdl.validateID(videoId)) {
-    return res.status(400).send('Invalid YouTube Video ID');
-  }
-  try {
-    res.setHeader('Content-Type', 'audio/mpeg');
-    const audioStream = ytdl(videoId, { filter: 'audioonly', quality: 'highestaudio' });
-    audioStream.pipe(res);
-    audioStream.on('error', (err) => {
-      console.error('Stream Error:', err);
-      if (!res.headersSent) res.status(500).send('Error during streaming.');
-    });
-  } catch (err) {
-    console.error('YTDL Initiation Error:', err);
-    if (!res.headersSent) res.status(500).send('Failed to initiate audio stream.');
-  }
+    // ... (rest of your stream logic)
+    const { videoId } = req.params;
+    if (!ytdl.validateID(videoId)) {
+      return res.status(400).send('Invalid YouTube Video ID');
+    }
+    try {
+      res.setHeader('Content-Type', 'audio/mpeg');
+      const audioStream = ytdl(videoId, { filter: 'audioonly', quality: 'highestaudio' });
+      audioStream.pipe(res);
+      audioStream.on('error', (err) => {
+        console.error('Stream Error:', err);
+        if (!res.headersSent) res.status(500).send('Error during streaming.');
+      });
+    } catch (err) {
+      console.error('YTDL Initiation Error:', err);
+      if (!res.headersSent) res.status(500).send('Failed to initiate audio stream.');
+    }
 });
 
 api.post('/search', async (req, res) => {
-  const { query, pageToken, md5Hash } = req.body;
-  if (md5Hash !== '6bb8c2f529084cdbc037e4b801cc2ab4') {
-    return res.status(403).json({ error: 'Invalid API key hash' });
-  }
-  try {
-    const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY; 
-    if (!YOUTUBE_API_KEY) {
-      console.error('YouTube API Key is missing from environment variables');
-      return res.status(500).json({ error: 'Server configuration error' });
+    // ... (rest of your search logic)
+    const { query, pageToken, md5Hash } = req.body;
+    if (md5Hash !== '6bb8c2f529084cdbc037e4b801cc2ab4') {
+      return res.status(403).json({ error: 'Invalid API key hash' });
     }
-    let apiUrl = `https://www.googleapis.com/youtube/v3/search?key=${YOUTUBE_API_KEY}&type=video&part=snippet&videoCategoryId=10&maxResults=10&q=${encodeURIComponent(query)}`;
-    if (pageToken) apiUrl += `&pageToken=${pageToken}`;
-    const response = await fetch(apiUrl);
-    const json = await response.json();
-    if (json.error) {
-      console.error('YouTube API Error:', json.error.message);
-      return res.status(500).json({ error: 'Failed to fetch from YouTube API' });
+    try {
+      const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY; 
+      if (!YOUTUBE_API_KEY) {
+        return res.status(500).json({ error: 'Server configuration error' });
+      }
+      let apiUrl = `https://www.googleapis.com/youtube/v3/search?key=${YOUTUBE_API_KEY}&type=video&part=snippet&videoCategoryId=10&maxResults=10&q=${encodeURIComponent(query)}`;
+      if (pageToken) apiUrl += `&pageToken=${pageToken}`;
+      const response = await fetch(apiUrl);
+      const json = await response.json();
+      if (json.error) {
+        return res.status(500).json({ error: 'Failed to fetch from YouTube API' });
+      }
+      const videos = json.items.map(item => ({
+        id: item.id.videoId,
+        title: item.snippet.title,
+        channel: item.snippet.channelTitle,
+        thumbnail: item.snippet.thumbnails.default.url
+      }));
+      res.json({ videos, nextPageToken: json.nextPageToken || null, prevPageToken: json.prevPageToken || null });
+    } catch (error) {
+      console.error('Search API error:', error);
+      res.status(500).json({ error: 'Search failed' });
     }
-    const videos = json.items.map(item => ({
-      id: item.id.videoId,
-      title: item.snippet.title,
-      channel: item.snippet.channelTitle,
-      thumbnail: item.snippet.thumbnails.default.url
-    }));
-    res.json({ videos, nextPageToken: json.nextPageToken || null, prevPageToken: json.prevPageToken || null });
-  } catch (error) {
-    console.error('Search API error:', error);
-    res.status(500).json({ error: 'Search failed' });
-  }
 });
 
-// [FIX] Tell the main 'app' to use our 'api' router for any path that starts with '/api'
+// Tell the main 'app' to use our 'api' router for any path that starts with '/api'
 app.use('/api', api);
 
-// The root route remains on the main app
+// A root route on the main app for basic checks
 app.get('/', (req, res) => res.status(200).json({ message: 'Server is up and running!' }));
-
-// Graceful shutdown handler
-const gracefulShutdown = () => {
-  console.log('Shutting down gracefully...');
-  server.close(() => {
-    console.log('Server closed');
-    process.exit(0);
-  });
-
-  // Force close after 5 seconds
-  setTimeout(() => {
-    console.error('Forcing shutdown after timeout');
-    process.exit(1);
-  }, 5000);
-};
 
 // Start the server
 const server = app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
 });
-
-// Listen for shutdown signals
-process.on('SIGTERM', gracefulShutdown);
-process.on('SIGINT', gracefulShutdown);
