@@ -1,38 +1,43 @@
+// api/index.js
+
 import express from 'express';
 import cors from 'cors';
 import fetch from 'node-fetch';
 import ytdl from '@distube/ytdl-core';
-import postgres from 'postgres';
+import postgres from 'postgres'; // Import the new database driver
 
 // --- Database Connection ---
+// This reads the connection string from the 'DATABASE_URL' environment variable
+// that you will set in your Railway project.
 const sql = postgres(process.env.DATABASE_URL, {
-  ssl: 'require', 
+  ssl: 'require', // Neon (and most cloud providers) require an SSL connection.
 });
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// --- Middleware ---
-
-// Fixes the "blocked by CORS policy" error from the browser.
-app.use(cors()); 
-
+// Middleware
+app.use(cors());
 app.use(express.json());
 
-// --- Core & Health Routes ---
+// --- Core & Health Routes (No changes) ---
+
 app.get('/', (req, res) => res.status(200).json({ message: 'Server is up and running!' }));
 app.get('/api/health', (req, res) => res.status(200).json({ status: 'ok' }));
 
-// --- Favorites API Routes ---
+
+// --- ⭐ NEW DATABASE-DRIVEN FAVORITES API ⭐ ---
+
+// GET /api/favorites - Fetch all favorites from the database
 app.get('/api/favorites', async (req, res) => {
   try {
     const favorites = await sql`SELECT * FROM favorites ORDER BY created_at DESC`;
+    // The database column is 'video_id', but the frontend expects 'id'. Let's map it.
     const formattedFavorites = favorites.map(fav => ({
         id: fav.video_id,
         title: fav.title,
         channel: fav.channel,
-        thumbnail: fav.thumbnail,
-        folderId: fav.folder_id
+        thumbnail: fav.thumbnail
     }));
     res.status(200).json(formattedFavorites);
   } catch (error) {
@@ -41,113 +46,47 @@ app.get('/api/favorites', async (req, res) => {
   }
 });
 
+// POST /api/favorites - Add a new favorite to the database
 app.post('/api/favorites', async (req, res) => {
   try {
-    const { id, title, channel, thumbnail, folderId } = req.body;
+    const { id, title, channel, thumbnail } = req.body;
     if (!id || !title || !channel) {
-      return res.status(400).json({ error: 'Missing required favorite data' });
+      return res.status(400).json({ error: 'Missing required favorite data (id, title, channel)' });
     }
+    // Use 'ON CONFLICT' to gracefully handle attempts to add a duplicate favorite.
     await sql`
-      INSERT INTO favorites (video_id, title, channel, thumbnail, folder_id)
-      VALUES (${id}, ${title}, ${channel}, ${thumbnail}, ${folderId || null})
-      ON CONFLICT (video_id) DO UPDATE SET
-        folder_id = EXCLUDED.folder_id,
-        title = EXCLUDED.title,
-        channel = EXCLUDED.channel,
-        thumbnail = EXCLUDED.thumbnail;
+      INSERT INTO favorites (video_id, title, channel, thumbnail)
+      VALUES (${id}, ${title}, ${channel}, ${thumbnail})
+      ON CONFLICT (video_id) DO NOTHING
     `;
-    res.status(201).json({ message: 'Favorite added or updated' });
+    res.status(201).json({ message: 'Favorite added successfully' });
   } catch (error) {
     console.error('DB Error - Adding favorite:', error);
     res.status(500).json({ error: 'Failed to add favorite to database' });
   }
 });
 
+// DELETE /api/favorites/:videoId - Remove a favorite from the database
 app.delete('/api/favorites/:videoId', async (req, res) => {
   try {
     const { videoId } = req.params;
-    await sql`DELETE FROM favorites WHERE video_id = ${videoId}`;
+    const result = await sql`
+      DELETE FROM favorites WHERE video_id = ${videoId}
+    `;
+    // Check if a row was actually deleted
+    if (result.count === 0) {
+        return res.status(404).json({ message: 'Favorite not found in database' });
+    }
     res.status(200).json({ message: 'Favorite removed successfully' });
   } catch (error) {
     console.error('DB Error - Removing favorite:', error);
-    res.status(500).json({ error: 'Failed to remove favorite' });
+    res.status(500).json({ error: 'Failed to remove favorite from database' });
   }
 });
 
-app.put('/api/favorites/:videoId/move', async (req, res) => {
-  try {
-    const { videoId } = req.params;
-    const { folderId } = req.body;
-    const result = await sql`
-      UPDATE favorites SET folder_id = ${folderId || null} WHERE video_id = ${videoId}
-    `;
-    if (result.count === 0) {
-      return res.status(404).json({ message: 'Favorite not found' });
-    }
-    res.status(200).json({ message: 'Favorite moved successfully' });
-  } catch (error) {
-    console.error('DB Error - Moving favorite:', error);
-    res.status(500).json({ error: 'Failed to move favorite' });
-  }
-});
 
-// --- Folders API Routes ---
-app.get('/api/folders', async (req, res) => {
-  try {
-    const folders = await sql`SELECT * FROM folders ORDER BY created_at DESC`;
-    res.status(200).json(folders);
-  } catch (error) {
-    console.error('DB Error - Fetching folders:', error);
-    res.status(500).json({ error: 'Failed to fetch folders' });
-  }
-});
+// --- Streaming and Search Routes (No changes) ---
 
-app.post('/api/folders', async (req, res) => {
-  try {
-    const { id, name, createdAt } = req.body;
-    if (!id || !name || !createdAt) {
-      return res.status(400).json({ error: 'Missing required folder data' });
-    }
-    const newFolder = await sql`
-      INSERT INTO folders (id, name, created_at) VALUES (${id}, ${name}, ${createdAt})
-      RETURNING *
-    `;
-    res.status(201).json(newFolder[0]);
-  } catch (error) {
-    console.error('DB Error - Creating folder:', error);
-    res.status(500).json({ error: 'Failed to create folder' });
-  }
-});
-
-app.put('/api/folders/:folderId', async (req, res) => {
-  try {
-    const { folderId } = req.params;
-    const { name } = req.body;
-    if (!name) return res.status(400).json({ error: 'New name is required' });
-
-    await sql`UPDATE folders SET name = ${name} WHERE id = ${folderId}`;
-    res.status(200).json({ message: 'Folder renamed' });
-  } catch (error) {
-    console.error('DB Error - Renaming folder:', error);
-    res.status(500).json({ error: 'Failed to rename folder' });
-  }
-});
-
-app.delete('/api/folders/:folderId', async (req, res) => {
-  const { folderId } = req.params;
-  try {
-    await sql.begin(async sql => {
-      await sql`UPDATE favorites SET folder_id = NULL WHERE folder_id = ${folderId}`;
-      await sql`DELETE FROM folders WHERE id = ${folderId}`;
-    });
-    res.status(200).json({ message: 'Folder deleted and contents moved to root' });
-  } catch (error) {
-    console.error('DB Error - Deleting folder:', error);
-    res.status(500).json({ error: 'Failed to delete folder' });
-  }
-});
-
-// --- Streaming and Search Routes ---
 app.get('/api/stream/:videoId', async (req, res) => {
   const { videoId } = req.params;
   if (!ytdl.validateID(videoId)) {
@@ -199,24 +138,7 @@ app.post('/api/search', async (req, res) => {
   }
 });
 
-// --- Start Server ---
-async function startServer() {
-  try {
-    // 1. Test database connection
-    await sql`SELECT 1`;
-    console.log('✅ Database connection successful.');
-
-    // 2. Start listening on the correct host and port for Railway
-    app.listen(PORT, '0.0.0.0', () => {
-      console.log(`✅ Server is running and listening on port ${PORT}`);
-    });
-    
-  } catch (error) {
-    console.error('🔴 FATAL: Could not connect to the database. Please check your DATABASE_URL environment variable.');
-    console.error(error);
-    process.exit(1); // Exit if database connection fails
-  }
-}
-
-// Run the server
-startServer();
+// Start the server
+app.listen(PORT, () => {
+  console.log(`✅ Server running on port ${PORT}`);
+});
