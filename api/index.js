@@ -223,3 +223,41 @@ const server = app.listen(PORT, () => {
 // Listen for shutdown signals
 process.on('SIGTERM', gracefulShutdown);
 process.on('SIGINT', gracefulShutdown);
+app.post('/api/folders', async (req, res) => {
+  try {
+    const { name } = req.body;
+    
+    // Validate input
+    if (!name || typeof name !== 'string') {
+      return res.status(400).json({ 
+        error: 'Folder name is required and must be a string' 
+      });
+    }
+    
+    // Check for duplicate folder names
+    const existingFolder = await sql`
+      SELECT * FROM folders WHERE name = ${name} LIMIT 1
+    `;
+    
+    if (existingFolder.length > 0) {
+      return res.status(409).json({ 
+        error: 'A folder with this name already exists' 
+      });
+    }
+    
+    // Create the folder
+    const [folder] = await sql`
+      INSERT INTO folders (name) 
+      VALUES (${name.trim()}) 
+      RETURNING *
+    `;
+    
+    res.status(201).json(folder);
+  } catch (error) {
+    console.error('DB Error - Creating folder:', error);
+    res.status(500).json({ 
+      error: 'Failed to create folder',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
