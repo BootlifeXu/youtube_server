@@ -1,5 +1,3 @@
-# Saving the updated backend file to provide a complete version to the user
-
 updated_backend_code = """
 // ✅ Updated api/index.js (with improved YTDL error handling)
 
