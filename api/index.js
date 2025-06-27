@@ -16,7 +16,11 @@ const sql = postgres(process.env.DATABASE_URL, {
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-app.use(cors());
+app.use(cors({
+  origin: 'https://zingy-torrone-962644.netlify.app',
+  methods: ['GET', 'POST', 'DELETE'],
+  allowedHeaders: ['Content-Type']
+}));
 app.use(express.json());
 
 app.get('/', (req, res) => res.status(200).json({ message: 'Server is up and running!' }));
