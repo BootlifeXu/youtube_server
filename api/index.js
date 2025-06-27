@@ -1,30 +1,48 @@
+// api/index.js
+
 import express from 'express';
 import cors from 'cors';
 import fetch from 'node-fetch';
 import ytdl from '@distube/ytdl-core';
 import postgres from 'postgres';
 
-// ✅ Connect to PostgreSQL (e.g. Railway, Neon)
+// Database Connection
 const sql = postgres(process.env.DATABASE_URL, {
   ssl: 'require',
 });
 
 const app = express();
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || 3000;
 
-// ✅ CORS to allow Netlify frontend
+// Enhanced CORS configuration
 app.use(cors({
-  origin: 'https://zingy-torrone-962644.netlify.app',
-  methods: ['GET', 'POST', 'DELETE'],
-  allowedHeaders: ['Content-Type']
+  origin: '*',
+  methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
 }));
+
+// Middleware
 app.use(express.json());
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+  next();
+});
 
-// ✅ Health check
-app.get('/', (req, res) => res.status(200).json({ message: 'Server is up and running!' }));
-app.get('/api/health', (req, res) => res.status(200).json({ status: 'ok' }));
+// Health Check Endpoints
+app.get('/', (req, res) => res.status(200).json({ 
+  message: 'Server is up and running!',
+  timestamp: new Date().toISOString()
+}));
 
-// ✅ Get all favorites
+app.get('/api/health', (req, res) => res.status(200).json({ 
+  status: 'ok',
+  db_connected: true, // You could add actual DB connection check here
+  server_time: new Date().toISOString()
+}));
+
+// --- Favorites API ---
+
+// GET all favorites
 app.get('/api/favorites', async (req, res) => {
   try {
     const favorites = await sql`SELECT * FROM favorites ORDER BY created_at DESC`;
@@ -37,115 +55,98 @@ app.get('/api/favorites', async (req, res) => {
     res.status(200).json(formattedFavorites);
   } catch (error) {
     console.error('DB Error - Fetching favorites:', error);
-    res.status(500).json({ error: 'Failed to fetch favorites from database' });
+    res.status(500).json({ 
+      error: 'Failed to fetch favorites from database',
+      details: error.message 
+    });
   }
 });
 
-// ✅ Add a new favorite
+// POST new favorite
 app.post('/api/favorites', async (req, res) => {
   try {
     const { id, title, channel, thumbnail } = req.body;
     if (!id || !title || !channel) {
-      return res.status(400).json({ error: 'Missing required favorite data (id, title, channel)' });
+      return res.status(400).json({ 
+        error: 'Missing required favorite data',
+        required: ['id', 'title', 'channel'] 
+      });
     }
-    await sql`
+
+    const result = await sql`
       INSERT INTO favorites (video_id, title, channel, thumbnail)
       VALUES (${id}, ${title}, ${channel}, ${thumbnail})
       ON CONFLICT (video_id) DO NOTHING
+      RETURNING *
     `;
-    res.status(201).json({ message: 'Favorite added successfully' });
+
+    if (result.length === 0) {
+      return res.status(200).json({ 
+        message: 'Video already exists in favorites',
+        video_id: id 
+      });
+    }
+
+    res.status(201).json({ 
+      message: 'Favorite added successfully',
+      favorite: result[0] 
+    });
   } catch (error) {
     console.error('DB Error - Adding favorite:', error);
-    res.status(500).json({ error: 'Failed to add favorite to database' });
+    res.status(500).json({ 
+      error: 'Failed to add favorite to database',
+      details: error.message 
+    });
   }
 });
 
-// ✅ Delete a favorite
+// DELETE favorite
 app.delete('/api/favorites/:videoId', async (req, res) => {
   try {
     const { videoId } = req.params;
     const result = await sql`
       DELETE FROM favorites WHERE video_id = ${videoId}
+      RETURNING *
     `;
+
     if (result.count === 0) {
-      return res.status(404).json({ message: 'Favorite not found in database' });
+      return res.status(404).json({ 
+        message: 'Favorite not found in database',
+        video_id: videoId 
+      });
     }
-    res.status(200).json({ message: 'Favorite removed successfully' });
+
+    res.status(200).json({ 
+      message: 'Favorite removed successfully',
+      deleted: result[0] 
+    });
   } catch (error) {
     console.error('DB Error - Removing favorite:', error);
-    res.status(500).json({ error: 'Failed to remove favorite from database' });
+    res.status(500).json({ 
+      error: 'Failed to remove favorite from database',
+      details: error.message 
+    });
   }
 });
 
-// ✅ Stream audio from YouTube
+// --- Streaming API with Enhanced YouTube Handling ---
+
 app.get('/api/stream/:videoId', async (req, res) => {
   const { videoId } = req.params;
-  console.log('Streaming request for video:', videoId);
-
+  
   if (!ytdl.validateID(videoId)) {
-    return res.status(400).send('Invalid YouTube Video ID');
+    return res.status(400).json({ 
+      error: 'Invalid YouTube Video ID',
+      received: videoId 
+    });
   }
 
   try {
-    res.setHeader('Content-Type', 'audio/mpeg');
-    const stream = ytdl(videoId, { filter: 'audioonly', quality: 'highestaudio' });
-    stream.pipe(res);
-    stream.on('error', err => {
-      console.error('YTDL Error:', err);
-      if (!res.headersSent) {
-        if (err.message.includes('Sign in to confirm')) {
-          res.status(403).send('Audio cannot be streamed due to YouTube restrictions.');
-        } else {
-          res.status(500).send('Audio streaming failed.');
+    // Validate video exists and is accessible
+    const info = await ytdl.getInfo(videoId, {
+      requestOptions: {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+          'Accept-Language': 'en-US,en;q=0.9'
         }
       }
-    });
-  } catch (err) {
-    console.error('YTDL Initiation Error:', err);
-    if (!res.headersSent) res.status(500).send('Audio stream could not be started.');
-  }
-});
-
-// ✅ YouTube Search API
-app.post('/api/search', async (req, res) => {
-  const { query, pageToken, md5Hash } = req.body;
-
-  if (md5Hash !== '6bb8c2f529084cdbc037e4b801cc2ab4') {
-    return res.status(403).json({ error: 'Invalid API key hash' });
-  }
-
-  try {
-    const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
-    if (!YOUTUBE_API_KEY) {
-      return res.status(500).json({ error: 'Server config error: Missing YouTube API key' });
-    }
-
-    let apiUrl = `https://www.googleapis.com/youtube/v3/search?key=${YOUTUBE_API_KEY}&type=video&part=snippet&videoCategoryId=10&maxResults=10&q=${encodeURIComponent(query)}`;
-    if (pageToken) apiUrl += `&pageToken=${pageToken}`;
-
-    const response = await fetch(apiUrl);
-    const json = await response.json();
-
-    if (json.error) {
-      return res.status(500).json({ error: 'Failed to fetch from YouTube API' });
-    }
-
-    const videos = json.items.map(item => ({
-      id: item.id.videoId,
-      title: item.snippet.title,
-      channel: item.snippet.channelTitle,
-      thumbnail: item.snippet.thumbnails.default.url
-    }));
-
-    res.json({ videos, nextPageToken: json.nextPageToken || null, prevPageToken: json.prevPageToken || null });
-
-  } catch (error) {
-    console.error('Search API error:', error);
-    res.status(500).json({ error: 'Search failed' });
-  }
-});
-
-// ✅ Start server
-app.listen(PORT, () => {
-  console.log(`✅ Server running on port ${PORT}`);
-});
