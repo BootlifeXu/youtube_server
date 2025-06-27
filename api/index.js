@@ -14,9 +14,9 @@ const sql = postgres(process.env.DATABASE_URL, {
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Enhanced CORS configuration for media streaming
+// Enhanced CORS configuration
 const corsOptions = {
-  origin: '*', // Allow all origins for now
+  origin: '*',
   methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Range', 'Accept', 'Accept-Encoding'],
   exposedHeaders: ['Content-Length', 'Content-Range', 'Accept-Ranges'],
@@ -26,15 +26,13 @@ const corsOptions = {
 // Middleware
 app.use(cors(corsOptions));
 app.use(express.json());
-
-// Handle preflight requests
 app.options('*', cors(corsOptions));
 
 // Core & Health Routes
 app.get('/', (req, res) => res.status(200).json({ message: 'Server is up and running!' }));
 app.get('/api/health', (req, res) => res.status(200).json({ status: 'ok' }));
 
-// Database-driven Favorites API
+// Database-driven Favorites API (unchanged)
 app.get('/api/favorites', async (req, res) => {
   try {
     const favorites = await sql`SELECT * FROM favorites ORDER BY created_at DESC`;
@@ -85,7 +83,7 @@ app.delete('/api/favorites/:videoId', async (req, res) => {
   }
 });
 
-// FIXED: Enhanced streaming endpoint with proper CORS and headers
+// FIXED: Enhanced streaming with anti-bot measures
 app.get('/api/stream/:videoId', async (req, res) => {
   const { videoId } = req.params;
   
@@ -94,43 +92,94 @@ app.get('/api/stream/:videoId', async (req, res) => {
   }
 
   try {
-    // Set CORS headers explicitly for media streaming
+    // Set CORS headers
     res.header('Access-Control-Allow-Origin', '*');
     res.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
     res.header('Access-Control-Allow-Headers', 'Range, Accept, Accept-Encoding, Content-Type');
     res.header('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges');
-    
-    // Set proper headers for audio streaming
     res.header('Content-Type', 'audio/mpeg');
     res.header('Accept-Ranges', 'bytes');
     res.header('Cache-Control', 'no-cache');
     
-    // Handle range requests for better streaming support
-    const range = req.headers.range;
-    
     console.log(`Streaming request for video: ${videoId}`);
-    
-    // Get video info first to check if it's available
-    const info = await ytdl.getInfo(videoId);
-    if (!info) {
-      return res.status(404).send('Video not found or unavailable');
-    }
 
-    const audioStream = ytdl(videoId, { 
-      filter: 'audioonly', 
+    // Enhanced YTDL options to bypass bot detection
+    const ytdlOptions = {
+      filter: 'audioonly',
       quality: 'highestaudio',
       requestOptions: {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+          // Mimic a real browser
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Accept-Encoding': 'gzip, deflate, br',
+          'Connection': 'keep-alive',
+          'Upgrade-Insecure-Requests': '1',
+          'Sec-Fetch-Dest': 'document',
+          'Sec-Fetch-Mode': 'navigate',
+          'Sec-Fetch-Site': 'none',
+          'Cache-Control': 'max-age=0'
         }
       }
-    });
+    };
 
-    // Set up error handling before piping
+    // Try to get video info first with retry logic
+    let info;
+    let retries = 3;
+    
+    for (let i = 0; i < retries; i++) {
+      try {
+        // Add delay between retries to avoid rate limiting
+        if (i > 0) {
+          await new Promise(resolve => setTimeout(resolve, 1000 * i));
+        }
+        
+        info = await ytdl.getInfo(videoId, ytdlOptions);
+        break; // Success, exit retry loop
+      } catch (err) {
+        console.log(`Attempt ${i + 1} failed:`, err.message);
+        
+        if (i === retries - 1) {
+          // Last attempt failed
+          if (err.message.includes('Sign in to confirm')) {
+            console.error('YouTube bot detection triggered');
+            return res.status(503).json({ 
+              error: 'YouTube temporarily blocked access. Please try again later.',
+              code: 'YOUTUBE_BOT_DETECTION'
+            });
+          } else if (err.message.includes('Video unavailable')) {
+            return res.status(404).json({ 
+              error: 'Video is unavailable or restricted',
+              code: 'VIDEO_UNAVAILABLE'
+            });
+          } else {
+            throw err; // Re-throw other errors
+          }
+        }
+      }
+    }
+
+    if (!info) {
+      return res.status(500).send('Failed to get video information');
+    }
+
+    // Create audio stream with enhanced options
+    const audioStream = ytdl(videoId, ytdlOptions);
+
+    // Enhanced error handling
     audioStream.on('error', (err) => {
-      console.error('Audio Stream Error:', err);
-      if (!res.headersSent) {
-        res.status(500).send('Error during audio streaming');
+      console.error('Audio Stream Error:', err.message);
+      if (err.message.includes('Sign in to confirm')) {
+        console.log('Bot detection during stream, attempting fallback...');
+        if (!res.headersSent) {
+          res.status(503).json({ 
+            error: 'Stream temporarily unavailable due to YouTube restrictions',
+            code: 'STREAM_BOT_DETECTION'
+          });
+        }
+      } else if (!res.headersSent) {
+        res.status(500).send('Error during audio streaming: ' + err.message);
       }
     });
 
@@ -138,7 +187,11 @@ app.get('/api/stream/:videoId', async (req, res) => {
       console.log('Audio stream response received, status:', response.statusCode);
     });
 
-    // Pipe the audio stream to response
+    audioStream.on('info', (info) => {
+      console.log('Stream info:', info.videoDetails?.title || 'Unknown title');
+    });
+
+    // Pipe the audio stream
     audioStream.pipe(res);
 
     // Handle client disconnect
@@ -149,13 +202,34 @@ app.get('/api/stream/:videoId', async (req, res) => {
 
   } catch (err) {
     console.error('YTDL Error:', err);
-    if (!res.headersSent) {
-      res.status(500).send('Failed to initiate audio stream: ' + err.message);
+    
+    if (err.message.includes('Sign in to confirm')) {
+      if (!res.headersSent) {
+        res.status(503).json({ 
+          error: 'YouTube has temporarily restricted access. This is usually temporary - please try again in a few minutes.',
+          code: 'YOUTUBE_BOT_DETECTION',
+          suggestion: 'Try a different video or wait a few minutes before trying again.'
+        });
+      }
+    } else if (err.message.includes('Video unavailable')) {
+      if (!res.headersSent) {
+        res.status(404).json({ 
+          error: 'This video is unavailable, private, or restricted in your region.',
+          code: 'VIDEO_UNAVAILABLE'
+        });
+      }
+    } else {
+      if (!res.headersSent) {
+        res.status(500).json({ 
+          error: 'Failed to process video: ' + err.message,
+          code: 'PROCESSING_ERROR'
+        });
+      }
     }
   }
 });
 
-// Search endpoint
+// Search endpoint (unchanged)
 app.post('/api/search', async (req, res) => {
   const { query, pageToken, md5Hash } = req.body;
   
