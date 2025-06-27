@@ -1,12 +1,10 @@
-updated_backend_code = """
-// ✅ Updated api/index.js (with improved YTDL error handling)
-
 import express from 'express';
 import cors from 'cors';
 import fetch from 'node-fetch';
 import ytdl from '@distube/ytdl-core';
 import postgres from 'postgres';
 
+// ✅ Connect to PostgreSQL (e.g. Railway, Neon)
 const sql = postgres(process.env.DATABASE_URL, {
   ssl: 'require',
 });
@@ -14,6 +12,7 @@ const sql = postgres(process.env.DATABASE_URL, {
 const app = express();
 const PORT = process.env.PORT || 8080;
 
+// ✅ CORS to allow Netlify frontend
 app.use(cors({
   origin: 'https://zingy-torrone-962644.netlify.app',
   methods: ['GET', 'POST', 'DELETE'],
@@ -21,12 +20,14 @@ app.use(cors({
 }));
 app.use(express.json());
 
+// ✅ Health check
 app.get('/', (req, res) => res.status(200).json({ message: 'Server is up and running!' }));
 app.get('/api/health', (req, res) => res.status(200).json({ status: 'ok' }));
 
+// ✅ Get all favorites
 app.get('/api/favorites', async (req, res) => {
   try {
-    const favorites = await sql\`SELECT * FROM favorites ORDER BY created_at DESC\`;
+    const favorites = await sql`SELECT * FROM favorites ORDER BY created_at DESC`;
     const formattedFavorites = favorites.map(fav => ({
       id: fav.video_id,
       title: fav.title,
@@ -40,17 +41,18 @@ app.get('/api/favorites', async (req, res) => {
   }
 });
 
+// ✅ Add a new favorite
 app.post('/api/favorites', async (req, res) => {
   try {
     const { id, title, channel, thumbnail } = req.body;
     if (!id || !title || !channel) {
       return res.status(400).json({ error: 'Missing required favorite data (id, title, channel)' });
     }
-    await sql\`
+    await sql`
       INSERT INTO favorites (video_id, title, channel, thumbnail)
-      VALUES (\${id}, \${title}, \${channel}, \${thumbnail})
+      VALUES (${id}, ${title}, ${channel}, ${thumbnail})
       ON CONFLICT (video_id) DO NOTHING
-    \`;
+    `;
     res.status(201).json({ message: 'Favorite added successfully' });
   } catch (error) {
     console.error('DB Error - Adding favorite:', error);
@@ -58,12 +60,13 @@ app.post('/api/favorites', async (req, res) => {
   }
 });
 
+// ✅ Delete a favorite
 app.delete('/api/favorites/:videoId', async (req, res) => {
   try {
     const { videoId } = req.params;
-    const result = await sql\`
-      DELETE FROM favorites WHERE video_id = \${videoId}
-    \`;
+    const result = await sql`
+      DELETE FROM favorites WHERE video_id = ${videoId}
+    `;
     if (result.count === 0) {
       return res.status(404).json({ message: 'Favorite not found in database' });
     }
@@ -74,7 +77,7 @@ app.delete('/api/favorites/:videoId', async (req, res) => {
   }
 });
 
-// ✅ Improved streaming endpoint with specific YTDL error handling
+// ✅ Stream audio from YouTube
 app.get('/api/stream/:videoId', async (req, res) => {
   const { videoId } = req.params;
   console.log('Streaming request for video:', videoId);
@@ -103,44 +106,46 @@ app.get('/api/stream/:videoId', async (req, res) => {
   }
 });
 
+// ✅ YouTube Search API
 app.post('/api/search', async (req, res) => {
   const { query, pageToken, md5Hash } = req.body;
+
   if (md5Hash !== '6bb8c2f529084cdbc037e4b801cc2ab4') {
     return res.status(403).json({ error: 'Invalid API key hash' });
   }
+
   try {
     const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
     if (!YOUTUBE_API_KEY) {
-      return res.status(500).json({ error: 'Server configuration error: Missing YouTube API key' });
+      return res.status(500).json({ error: 'Server config error: Missing YouTube API key' });
     }
-    let apiUrl = \`https://www.googleapis.com/youtube/v3/search?key=\${YOUTUBE_API_KEY}&type=video&part=snippet&videoCategoryId=10&maxResults=10&q=\${encodeURIComponent(query)}\`;
-    if (pageToken) apiUrl += \`&pageToken=\${pageToken}\`;
+
+    let apiUrl = `https://www.googleapis.com/youtube/v3/search?key=${YOUTUBE_API_KEY}&type=video&part=snippet&videoCategoryId=10&maxResults=10&q=${encodeURIComponent(query)}`;
+    if (pageToken) apiUrl += `&pageToken=${pageToken}`;
+
     const response = await fetch(apiUrl);
     const json = await response.json();
+
     if (json.error) {
       return res.status(500).json({ error: 'Failed to fetch from YouTube API' });
     }
+
     const videos = json.items.map(item => ({
       id: item.id.videoId,
       title: item.snippet.title,
       channel: item.snippet.channelTitle,
       thumbnail: item.snippet.thumbnails.default.url
     }));
+
     res.json({ videos, nextPageToken: json.nextPageToken || null, prevPageToken: json.prevPageToken || null });
+
   } catch (error) {
     console.error('Search API error:', error);
     res.status(500).json({ error: 'Search failed' });
   }
 });
 
+// ✅ Start server
 app.listen(PORT, () => {
-  console.log(`✅ Server running on port \${PORT}`);
+  console.log(`✅ Server running on port ${PORT}`);
 });
-"""
-
-# Save to file so the user can download it
-path = "/mnt/data/index_updated.js"
-with open(path, "w") as f:
-    f.write(updated_backend_code)
-
-path
