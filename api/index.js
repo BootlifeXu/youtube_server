@@ -4,36 +4,63 @@ import fetch from 'node-fetch';
 import ytdl from '@distube/ytdl-core';
 import postgres from 'postgres';
 
-// Database Connection
-const sql = postgres(process.env.DATABASE_URL, {
-  ssl: 'require',
-});
-
+// Initialize Express
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware
-app.use(cors());
-app.use(express.json());
+// Enhanced CORS configuration
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'DELETE'],
+  allowedHeaders: ['Content-Type']
+}));
 
-// Health Check
-app.get('/api/health', (req, res) => {
-  res.status(200).json({ status: 'ok' });
+// Middleware to ensure JSON responses
+app.use(express.json());
+app.use((req, res, next) => {
+  res.setHeader('Content-Type', 'application/json');
+  next();
 });
 
-// Stream Endpoint
-app.get('/api/stream/:videoId', async (req, res) => {
-  const { videoId } = req.params;
-  
-  if (!ytdl.validateID(videoId)) {
-    return res.status(400).json({ error: 'Invalid YouTube Video ID' });
-  }
+// Database Connection with error handling
+let sql;
+try {
+  sql = postgres(process.env.DATABASE_URL, { ssl: 'require' });
+  console.log('✅ Database connected');
+} catch (err) {
+  console.error('❌ Database connection failed:', err);
+  process.exit(1);
+}
 
+// Health Check
+app.get('/api/health', async (req, res) => {
   try {
-    res.setHeader('Content-Type', 'audio/mpeg');
-    const audioStream = ytdl(videoId, {
-      filter: 'audioonly',
-      quality: 'highestaudio',
+    // Test database connection
+    await sql`SELECT 1`;
+    res.status(200).json({ 
+      status: 'ok',
+      database: 'connected',
+      timestamp: new Date().toISOString()
+    });
+  } catch (err) {
+    res.status(500).json({ 
+      status: 'error',
+      database: 'disconnected',
+      error: err.message 
+    });
+  }
+});
+
+// Stream Endpoint with improved error handling
+app.get('/api/stream/:videoId', async (req, res) => {
+  try {
+    const { videoId } = req.params;
+    
+    if (!ytdl.validateID(videoId)) {
+      return res.status(400).json({ error: 'Invalid YouTube Video ID' });
+    }
+
+    const info = await ytdl.getInfo(videoId, {
       requestOptions: {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
@@ -42,26 +69,44 @@ app.get('/api/stream/:videoId', async (req, res) => {
       }
     });
 
+    res.setHeader('Content-Type', 'audio/mpeg');
+    const audioStream = ytdl(videoId, {
+      filter: 'audioonly',
+      quality: 'highestaudio',
+      requestOptions: { headers: info.requestOptions.headers }
+    });
+
     audioStream.pipe(res);
     audioStream.on('error', (err) => {
-      console.error('Stream Error:', err);
-      if (!res.headersSent) res.status(500).send('Error during streaming.');
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Stream error', details: err.message });
+      }
     });
+
   } catch (err) {
-    console.error('YTDL Initiation Error:', err);
-    if (!res.headersSent) res.status(500).send('Failed to initiate audio stream.');
+    console.error('Stream error:', err);
+    if (!res.headersSent) {
+      res.status(500).json({ 
+        error: 'Failed to stream audio',
+        details: err.message,
+        youtubeError: err.message.includes('confirm you are not a robot') 
+          ? 'YouTube requires verification' 
+          : null
+      });
+    }
   }
+});
+
+// Error handling middleware (MUST be last)
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err);
+  res.status(500).json({ 
+    error: 'Internal server error',
+    message: err.message 
+  });
 });
 
 // Start Server
 app.listen(PORT, () => {
-  console.log(`✅ Server running on port ${PORT}`);
+  console.log(`🚀 Server running on port ${PORT}`);
 });
-
-// Test database connection on startup
-sql`SELECT 1`
-  .then(() => console.log('✅ Database connected'))
-  .catch(err => {
-    console.error('❌ Database connection failed:', err);
-    process.exit(1);
-  });
