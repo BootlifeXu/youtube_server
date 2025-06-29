@@ -18,7 +18,7 @@ app.use(cors({
 }));
 app.use(express.json());
 app.use((req, res, next) => {
-  res.setHeader('Content-Type', 'application/json');
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
   next();
 });
 
@@ -27,9 +27,30 @@ let sql;
 try {
   sql = postgres(process.env.DATABASE_URL, { ssl: 'require' });
   console.log('✅ Database connected');
+  
+  // Initialize favorites table on startup
+  initDatabase();
 } catch (err) {
   console.error('❌ Database connection failed:', err);
   process.exit(1);
+}
+
+// --- Initialize Database Tables ---
+async function initDatabase() {
+  try {
+    await sql`
+      CREATE TABLE IF NOT EXISTS favorites (
+        id VARCHAR(20) PRIMARY KEY,
+        title TEXT NOT NULL,
+        channel TEXT NOT NULL,
+        thumbnail TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `;
+    console.log('✅ Database tables initialized');
+  } catch (err) {
+    console.error('❌ Failed to initialize database tables:', err);
+  }
 }
 
 // --- /api/health ---
@@ -141,6 +162,108 @@ app.get('/api/stream/:videoId', async (req, res) => {
           : null
       });
     }
+  }
+});
+
+// --- ⭐ NEW FAVORITES API ENDPOINTS ⭐ ---
+
+// GET /api/favorites - Fetch all favorites
+app.get('/api/favorites', async (req, res) => {
+  try {
+    const favorites = await sql`
+      SELECT id, title, channel, thumbnail, created_at 
+      FROM favorites 
+      ORDER BY created_at DESC
+    `;
+    
+    res.json(favorites);
+  } catch (err) {
+    console.error('Fetch favorites error:', err);
+    res.status(500).json({ 
+      error: 'Failed to fetch favorites', 
+      details: err.message 
+    });
+  }
+});
+
+// POST /api/favorites - Add a new favorite
+app.post('/api/favorites', async (req, res) => {
+  const { id, title, channel, thumbnail } = req.body;
+
+  // Validation
+  if (!id || !title || !channel) {
+    return res.status(400).json({ 
+      error: 'Missing required fields: id, title, channel' 
+    });
+  }
+
+  if (typeof id !== 'string' || id.length > 20) {
+    return res.status(400).json({ 
+      error: 'Invalid video ID format' 
+    });
+  }
+
+  try {
+    // Check if already exists
+    const existing = await sql`
+      SELECT id FROM favorites WHERE id = ${id}
+    `;
+
+    if (existing.length > 0) {
+      return res.status(409).json({ 
+        error: 'Video already in favorites' 
+      });
+    }
+
+    // Insert new favorite
+    await sql`
+      INSERT INTO favorites (id, title, channel, thumbnail)
+      VALUES (${id}, ${title}, ${channel}, ${thumbnail || null})
+    `;
+
+    res.status(201).json({ 
+      message: 'Added to favorites successfully',
+      favorite: { id, title, channel, thumbnail }
+    });
+
+  } catch (err) {
+    console.error('Add favorite error:', err);
+    res.status(500).json({ 
+      error: 'Failed to add favorite', 
+      details: err.message 
+    });
+  }
+});
+
+// DELETE /api/favorites/:id - Remove a favorite
+app.delete('/api/favorites/:id', async (req, res) => {
+  const { id } = req.params;
+
+  if (!id) {
+    return res.status(400).json({ error: 'Missing video ID' });
+  }
+
+  try {
+    const result = await sql`
+      DELETE FROM favorites WHERE id = ${id}
+    `;
+
+    if (result.count === 0) {
+      return res.status(404).json({ 
+        error: 'Favorite not found' 
+      });
+    }
+
+    res.json({ 
+      message: 'Removed from favorites successfully' 
+    });
+
+  } catch (err) {
+    console.error('Remove favorite error:', err);
+    res.status(500).json({ 
+      error: 'Failed to remove favorite', 
+      details: err.message 
+    });
   }
 });
 
