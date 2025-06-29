@@ -3,26 +3,26 @@ import cors from 'cors';
 import fetch from 'node-fetch';
 import ytdl from '@distube/ytdl-core';
 import postgres from 'postgres';
+import crypto from 'crypto';
 
-// Initialize Express
 const app = express();
 const PORT = process.env.PORT || 3000;
+const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
+const ALLOWED_MD5 = '6bb8c2f529084cdbc037e4b801cc2ab4'; // MD5 of real key
 
-// Enhanced CORS configuration
+// --- Middleware ---
 app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'DELETE'],
   allowedHeaders: ['Content-Type']
 }));
-
-// Middleware to ensure JSON responses
 app.use(express.json());
 app.use((req, res, next) => {
   res.setHeader('Content-Type', 'application/json');
   next();
 });
 
-// Database Connection with error handling
+// --- PostgreSQL ---
 let sql;
 try {
   sql = postgres(process.env.DATABASE_URL, { ssl: 'require' });
@@ -32,30 +32,77 @@ try {
   process.exit(1);
 }
 
-// Health Check
+// --- /api/health ---
 app.get('/api/health', async (req, res) => {
   try {
-    // Test database connection
     await sql`SELECT 1`;
-    res.status(200).json({ 
+    res.status(200).json({
       status: 'ok',
       database: 'connected',
       timestamp: new Date().toISOString()
     });
   } catch (err) {
-    res.status(500).json({ 
+    res.status(500).json({
       status: 'error',
       database: 'disconnected',
-      error: err.message 
+      error: err.message
     });
   }
 });
 
-// Stream Endpoint with improved error handling
+// --- /api/search ---
+app.post('/api/search', async (req, res) => {
+  const { query, pageToken, md5Hash } = req.body;
+
+  if (!query || typeof query !== 'string') {
+    return res.status(400).json({ error: 'Missing or invalid query' });
+  }
+
+  const computedHash = crypto.createHash('md5').update(YOUTUBE_API_KEY).digest('hex');
+  if (computedHash !== md5Hash) {
+    return res.status(401).json({ error: 'Unauthorized or invalid key hash' });
+  }
+
+  try {
+    const url = new URL('https://www.googleapis.com/youtube/v3/search');
+    url.searchParams.set('part', 'snippet');
+    url.searchParams.set('maxResults', '10');
+    url.searchParams.set('q', query);
+    url.searchParams.set('type', 'video');
+    url.searchParams.set('key', YOUTUBE_API_KEY);
+    if (pageToken) url.searchParams.set('pageToken', pageToken);
+
+    const response = await fetch(url.toString());
+    const data = await response.json();
+
+    if (!response.ok) {
+      return res.status(500).json({ error: 'YouTube API error', details: data });
+    }
+
+    const videos = data.items.map(item => ({
+      id: item.id.videoId,
+      title: item.snippet.title,
+      channel: item.snippet.channelTitle,
+      thumbnail: item.snippet.thumbnails.default.url
+    }));
+
+    res.json({
+      videos,
+      nextPageToken: data.nextPageToken || null,
+      prevPageToken: data.prevPageToken || null
+    });
+
+  } catch (err) {
+    console.error('Search error:', err);
+    res.status(500).json({ error: 'Failed to fetch YouTube data', details: err.message });
+  }
+});
+
+// --- /api/stream/:videoId ---
 app.get('/api/stream/:videoId', async (req, res) => {
   try {
     const { videoId } = req.params;
-    
+
     if (!ytdl.validateID(videoId)) {
       return res.status(400).json({ error: 'Invalid YouTube Video ID' });
     }
@@ -63,21 +110,21 @@ app.get('/api/stream/:videoId', async (req, res) => {
     const info = await ytdl.getInfo(videoId, {
       requestOptions: {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+          'User-Agent': 'Mozilla/5.0',
           'Accept-Language': 'en-US,en;q=0.9'
         }
       }
     });
 
     res.setHeader('Content-Type', 'audio/mpeg');
-    const audioStream = ytdl(videoId, {
+    const stream = ytdl(videoId, {
       filter: 'audioonly',
       quality: 'highestaudio',
       requestOptions: { headers: info.requestOptions.headers }
     });
 
-    audioStream.pipe(res);
-    audioStream.on('error', (err) => {
+    stream.pipe(res);
+    stream.on('error', (err) => {
       if (!res.headersSent) {
         res.status(500).json({ error: 'Stream error', details: err.message });
       }
@@ -86,27 +133,32 @@ app.get('/api/stream/:videoId', async (req, res) => {
   } catch (err) {
     console.error('Stream error:', err);
     if (!res.headersSent) {
-      res.status(500).json({ 
+      res.status(500).json({
         error: 'Failed to stream audio',
         details: err.message,
-        youtubeError: err.message.includes('confirm you are not a robot') 
-          ? 'YouTube requires verification' 
+        youtubeError: err.message.includes('confirm you are not a robot')
+          ? 'YouTube requires verification'
           : null
       });
     }
   }
 });
 
-// Error handling middleware (MUST be last)
+// --- Catch-all 404 for unknown /api routes ---
+app.use('/api', (req, res) => {
+  res.status(404).json({ error: 'API route not found' });
+});
+
+// --- Global error handler ---
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err);
-  res.status(500).json({ 
+  res.status(500).json({
     error: 'Internal server error',
-    message: err.message 
+    message: err.message
   });
 });
 
-// Start Server
+// --- Start server ---
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
